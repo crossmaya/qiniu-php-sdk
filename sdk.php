@@ -1,5 +1,4 @@
 <?php
-//七牛的phpSDK用的我脑袋都抽筋,看完代码我都想骂妈。
 class SDK implements ArrayAccess {
 
 	const QINIU_UP_HOST	= 'http://up.qiniu.com';
@@ -82,8 +81,8 @@ class SDK implements ArrayAccess {
 		}
 		else
 		{
-			$key = implode('|', array_slice($segments, 1));
-			$this->cache[$key] = array($segments[0], $key);
+			$temp = implode('|', array_slice($segments, 1));
+			$this->cache[$key] = array($segments[0], $temp);
 		}
 		return $this->cache[$key];
 	}
