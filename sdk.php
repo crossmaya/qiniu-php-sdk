@@ -8,7 +8,7 @@ class SDK implements ArrayAccess {
 	//删除 
 	//复制 x
 	//移动 x
-	//上传 x
+	//上传 
 	protected $access_token ;
 	protected $secret_token ;
 	protected $bucket;
@@ -30,15 +30,18 @@ class SDK implements ArrayAccess {
 		$this->bucket = $bucket;
 	}
 
+	//获取空间名称
 	public function getBucket()
 	{
 		return $this->bucket;
 	}
 
+	//设置空间
 	public function setBucket($bucket)
 	{
 		$this->bucket = $bucket;
 	}
+
 	/**
 	 * 查看指定文件信息。
 	 * @param  string $key  	文件名或者目录+文件名
@@ -52,9 +55,16 @@ class SDK implements ArrayAccess {
 			die('error');
 		}
 		$url = self::QINIU_RS_HOST .'/stat/' . $this->encode("$bucket:$key");
-		return $this->get($url);
+		$token = $this->accessToken($url);
+		$options[CURLOPT_HTTPHEADER] = array('Authorization: QBox '. $token);
+		return $this->get($url, $options);
 	}
 
+	/**
+	 * 删除指定文件信息。
+	 * @param  string $key  	文件名或者目录+文件名
+	 * @return NULL
+	 */
 	public function delete($key)
 	{
 		list($bucket, $key) = $this->parseKey($key);
@@ -64,7 +74,45 @@ class SDK implements ArrayAccess {
 		}
 		$url = self::QINIU_RS_HOST .'/delete/' . $this->encode("$bucket:$key");
 
-		return $this->get($url);
+		$token = $this->accessToken($url);
+		$options[CURLOPT_HTTPHEADER] = array('Authorization: QBox '. $token);
+		return $this->get($url, $options);
+	}
+
+	public function upload($file, $name=null, $token = null)
+	{
+		if ( NULL === $token ) 
+		{
+			$token = $this->uploadToken($this->bucket);
+		}
+
+		if ( !file_exists($file) ) 
+		{
+			die('文件不存在，构建一个临时文件');
+		}
+		$hash = hash_file('crc32b', $file);
+		$array = unpack('N', pack('H*', $hash));
+
+		$postFields = array(
+			'token' => $token,
+			'file'  => '@'.$file,
+			'key'   => $name,
+			'crc32' => sprintf('%u', $array[1]),
+		);
+
+		//未指定文件名，使用七牛默认的随机文件名
+		if ( NULL === $name ) 
+		{
+			unset($postFields['key']);
+		}
+		else
+		{
+			//设置文件名后缀。
+		}
+		$options = array(
+			CURLOPT_POSTFIELDS => $postFields,
+		);
+		return $this->get(self::QINIU_UP_HOST, $options);
 	}
 
 	protected function parseKey($key)
@@ -92,6 +140,49 @@ class SDK implements ArrayAccess {
 		return isset($this->aliases[$key]) ? $this->aliases[$key] : $key;
 	}
 
+	public function uploadToken($config = array())
+	{
+		if ( is_string($config) ) 
+		{
+			$scope = $config;
+			$config = array();
+		}
+		else
+		{
+			$scope = $config['scope'];
+		}
+		$config['scope'] = $scope;
+		//硬编码，需修改。
+		$config['deadline'] = time() + 3600;
+		foreach ( $this->activeUploadSettings($config) as $key => $value ) 
+		{
+			if ( $value ) 
+			{
+				$config[$key] = $value;
+			}
+		}
+
+		//build token
+		$body = json_encode($config);
+		$body = $this->encode($body);
+		$sign = hash_hmac('sha1', $body, $this->secret_token, true);
+		return $this->access_token . ':' . $this->encode($sign) . ':' .$body;
+	}
+
+	public function uploadSettings()
+	{
+		return array(
+			'scope','deadline','callbackUrl', 'callbackBody', 'returnUrl',
+			'returnBody', 'asyncOps', 'endUser', 'exclusive', 'detectMime',
+			'fsizeLimit', 'saveKey', 'persistentOps', 'persistentNotifyUrl'
+		);
+	}
+
+	protected function activeUploadSettings($array)
+	{
+		return array_intersect_key($array, array_flip($this->uploadSettings()));
+	}
+
 	public function accessToken($url, $body = false)
 	{
 		$url = parse_url($url);
@@ -113,8 +204,6 @@ class SDK implements ArrayAccess {
 	public function get($url, $options = array())
 	{
 		$this->ch = curl_init();
-		$token = $this->accessToken($url);
-		$options[CURLOPT_HTTPHEADER] = array('Authorization: QBox '. $token);
 		$this->options[CURLOPT_URL] = $url;
 		$this->options = $options + $this->options;
 		//临时处理逻辑
@@ -221,10 +310,3 @@ class SDK implements ArrayAccess {
 		return $this->delete();
 	}
 }
-
-//demo
-$accessKey = '';
-$secretKey = '';
-$bucket = "phpsdk";
-$sdk = new SDK($accessKey, $secretKey, $bucket);
-$test = $sdk['test.jpg']; // $sdk->stat('test.jpg'); or $sdk->stat('your bucket|your file name');
